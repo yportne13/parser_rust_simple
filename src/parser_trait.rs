@@ -1,17 +1,26 @@
-use std::ops::{Mul, Shl, Shr};
+use std::ops::{Mul, Shl, Shr, BitOr};
 use regex::Regex;
 
+#[derive(Clone, Copy)]
 pub struct Token<'a>(pub &'a str);
 #[derive(Clone, Copy)]
 pub struct ParseRegex<'a>(pub &'a str);
 
+#[derive(Clone, Copy)]
 pub struct Try<A>(pub A);
+#[derive(Clone, Copy)]
 pub struct Many<'a, A>(pub A, pub Option<&'a str>);
 
+#[derive(Clone, Copy)]
 pub struct ParserMap<I, F>(pub I, pub F);
+#[derive(Clone, Copy)]
 pub struct ParserProduct<A, B>(pub A, pub B);
+#[derive(Clone, Copy)]
 pub struct ParserLeft<A, B>(pub A, pub B);
+#[derive(Clone, Copy)]
 pub struct ParserRight<A, B>(pub A, pub B);
+#[derive(Clone, Copy)]
+pub struct ParserOr<A, B>(pub A, pub B);
 
 pub trait Parser:
     Mul + Shr + Shl + std::marker::Sized
@@ -52,7 +61,10 @@ impl<'a> Parser for ParseRegex<'a> {
         let re = Regex::new(self.0).unwrap();
         let cap = re.find(input).map(|x| x.as_str());
         let o = cap.and_then(|x| input.strip_prefix(x));
-        (cap.map(|x| x.to_string()), o.unwrap_or(input))
+        match o {
+            Some(output) => (cap.map(|x| x.to_string()), output),
+            None => (None, input)
+        }
     }
 }
 
@@ -155,169 +167,89 @@ impl<A: Parser, B: Parser> Parser for ParserRight<A, B> {
     }
 }
 
-macro_rules! shr_impl {
-    ($($t:ty)*) => {$(
-        impl<'a, B: Parser> Shr<B> for $t
-        where
-            Self: Sized
-        {
-            type Output = ParserRight<Self, B>;
+impl<O, A: Parser<Out = O>, B: Parser<Out = O>> Parser for ParserOr<A, B> {
+    type Out = O;
 
-            fn shr(self, rhs: B) -> Self::Output
-            where
-                Self: Sized
-            {
-                ParserRight(self, rhs)
-            }
+    fn run_with_out(self, input: &str) -> (Option<Self::Out>, &str) {
+        let (lefto, lefts) = self.0.run_with_out(input);
+        let ro = self.1.run_with_out(input);
+        match lefto {
+            Some(l) => (Some(l), lefts),
+            None => ro,
         }
-    )*};
-    ($($i1:ident,$t:ty)*) => {$(
-        impl<$i1, B: Parser> Shr<B> for $t
-        where
-            Self: Sized
-        {
-            type Output = ParserRight<Self, B>;
-
-            fn shr(self, rhs: B) -> Self::Output
-            where
-                Self: Sized
-            {
-                ParserRight(self, rhs)
-            }
-        }
-    )*};
-    ($($i1:ident,$i2:ident,$t:ty)*) => {$(
-        impl<$i1, $i2, B: Parser> Shr<B> for $t
-        where
-            Self: Sized
-        {
-            type Output = ParserRight<Self, B>;
-
-            fn shr(self, rhs: B) -> Self::Output
-            where
-                Self: Sized
-            {
-                ParserRight(self, rhs)
-            }
-        }
-    )*}
+    }
 }
 
-macro_rules! shl_impl {
-    ($($t:ty)*) => {$(
-        impl<'a, B: Parser> Shl<B> for $t
+macro_rules! op_impl {
+    ($($t:ty,$tr1:ty,$tr2:ident,$tt1:ty,$tt2:ident)*) => {$(
+        impl<'a, B: Parser> $tr1 for $t
         where
             Self: Sized
         {
-            type Output = ParserLeft<Self, B>;
+            type Output = $tt1;
 
-            fn shl(self, rhs: B) -> Self::Output
+            fn $tr2(self, rhs: B) -> Self::Output
             where
                 Self: Sized
             {
-                ParserLeft(self, rhs)
+                $tt2(self, rhs)
             }
         }
     )*};
-    ($($i1:ident,$t:ty)*) => {$(
-        impl<$i1, B: Parser> Shl<B> for $t
+    ($($i1:ident,$t:ty,$tr1:ty,$tr2:ident,$tt1:ty,$tt2:ident)*) => {$(
+        impl<$i1, B: Parser> $tr1 for $t
         where
             Self: Sized
         {
-            type Output = ParserLeft<Self, B>;
+            type Output = $tt1;
 
-            fn shl(self, rhs: B) -> Self::Output
+            fn $tr2(self, rhs: B) -> Self::Output
             where
                 Self: Sized
             {
-                ParserLeft(self, rhs)
+                $tt2(self, rhs)
             }
         }
     )*};
-    ($($i1:ident,$i2:ident,$t:ty)*) => {$(
-        impl<$i1, $i2, B: Parser> Shl<B> for $t
+    ($($i1:ident,$i2:ident,$t:ty,$tr1:ty,$tr2:ident,$tt1:ty,$tt2:ident)*) => {$(
+        impl<$i1, $i2, B: Parser> $tr1 for $t
         where
             Self: Sized
         {
-            type Output = ParserLeft<Self, B>;
+            type Output = $tt1;
 
-            fn shl(self, rhs: B) -> Self::Output
+            fn $tr2(self, rhs: B) -> Self::Output
             where
                 Self: Sized
             {
-                ParserLeft(self, rhs)
-            }
-        }
-    )*}
-}
-
-macro_rules! mul_impl {
-    ($($t:ty)*) => {$(
-        impl<'a, B: Parser> Mul<B> for $t
-        where
-            Self: Sized
-        {
-            type Output = ParserProduct<Self, B>;
-
-            fn mul(self, rhs: B) -> Self::Output
-            where
-                Self: Sized
-            {
-                ParserProduct(self, rhs)
+                $tt2(self, rhs)
             }
         }
     )*};
-    ($($i1:ident,$t:ty)*) => {$(
-        impl<$i1, B: Parser> Mul<B> for $t
-        where
-            Self: Sized
-        {
-            type Output = ParserProduct<Self, B>;
-
-            fn mul(self, rhs: B) -> Self::Output
-            where
-                Self: Sized
-            {
-                ParserProduct(self, rhs)
-            }
-        }
-    )*};
-    ($($i1:ident,$i2:ident,$t:ty)*) => {$(
-        impl<$i1, $i2, B: Parser> Mul<B> for $t
-        where
-            Self: Sized
-        {
-            type Output = ParserProduct<Self, B>;
-
-            fn mul(self, rhs: B) -> Self::Output
-            where
-                Self: Sized
-            {
-                ParserProduct(self, rhs)
-            }
-        }
-    )*}
 }
 
 macro_rules! ops_impl {
     ($($t:ty)+) => {$(
-        shr_impl!($t);
-        shl_impl!($t);
-        mul_impl!($t);
+        op_impl!($t, Mul<B>, mul, ParserProduct<Self, B>, ParserProduct);
+        op_impl!($t, Shr<B>, shr, ParserRight<Self, B>, ParserRight);
+        op_impl!($t, Shl<B>, shl, ParserLeft<Self, B>, ParserLeft);
+        op_impl!($t, BitOr<B>, bitor, ParserOr<Self, B>, ParserOr);
     )*};
     ($($i1:ident,$t:ty)*) => {$(
-        shr_impl!($i1, $t);
-        shl_impl!($i1, $t);
-        mul_impl!($i1, $t);
+        op_impl!($i1, $t, Mul<B>, mul, ParserProduct<Self, B>, ParserProduct);
+        op_impl!($i1, $t, Shr<B>, shr, ParserRight<Self, B>, ParserRight);
+        op_impl!($i1, $t, Shl<B>, shl, ParserLeft<Self, B>, ParserLeft);
+        op_impl!($i1, $t, BitOr<B>, bitor, ParserOr<Self, B>, ParserOr);
     )*};
     ($($i1:ident,$i2:ident,$t:ty)*) => {$(
-        shr_impl!($i1, $i2, $t);
-        shl_impl!($i1, $i2, $t);
-        mul_impl!($i1, $i2, $t);
+        op_impl!($i1, $i2, $t, Mul<B>, mul, ParserProduct<Self, B>, ParserProduct);
+        op_impl!($i1, $i2, $t, Shr<B>, shr, ParserRight<Self, B>, ParserRight);
+        op_impl!($i1, $i2, $t, Shl<B>, shl, ParserLeft<Self, B>, ParserLeft);
+        op_impl!($i1, $i2, $t, BitOr<B>, bitor, ParserOr<Self, B>, ParserOr);
     )*};
 }
 
-macro_rules! op_impl {
+macro_rules! opmany_impl {
     ($($i1:ident,$t:ty,$tr1:ty,$tr2:ident,$tt1:ty,$tt2:ident)*) => {$(
         impl<'a, $i1, B: Parser> $tr1 for $t
         where
@@ -338,12 +270,12 @@ macro_rules! op_impl {
 ops_impl!(Token<'a>);
 ops_impl!(ParseRegex<'a>);
 ops_impl!(A, Try<A>);
-//ops_impl!('a, A, Many<'a, A>);
 ops_impl!(I, F, ParserMap<I, F>);
 ops_impl!(I, F, ParserProduct<I, F>);
 ops_impl!(I, F, ParserLeft<I, F>);
 ops_impl!(I, F, ParserRight<I, F>);
+ops_impl!(I, F, ParserOr<I, F>);
 
-op_impl!(A, Many<'a,A>, Mul<B>, mul, ParserProduct<Self, B>, ParserProduct);
-op_impl!(A, Many<'a,A>, Shr<B>, shr, ParserRight<Self, B>, ParserRight);
-op_impl!(A, Many<'a,A>, Shl<B>, shl, ParserLeft<Self, B>, ParserLeft);
+opmany_impl!(A, Many<'a,A>, Mul<B>, mul, ParserProduct<Self, B>, ParserProduct);
+opmany_impl!(A, Many<'a,A>, Shr<B>, shr, ParserRight<Self, B>, ParserRight);
+opmany_impl!(A, Many<'a,A>, Shl<B>, shl, ParserLeft<Self, B>, ParserLeft);
