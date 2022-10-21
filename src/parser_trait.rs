@@ -1,6 +1,8 @@
 use std::ops::{Mul, Shl, Shr, BitOr};
 use regex::Regex;
 
+use crate::location::Location;
+
 #[derive(Clone, Copy)]
 pub struct Token<'a>(pub &'a str);
 #[derive(Clone, Copy)]
@@ -26,12 +28,12 @@ pub trait Parser:
     Mul + Shr + Shl + std::marker::Sized
 {
     type Out;
-    fn run_with_out(self, input: &str) -> (Option<Self::Out>, &str);
+    fn run_with_out(self, input: &str, loc: Location) -> (Option<Self::Out>, &str, Location);
     fn run(self, input: &str) -> Option<Self::Out>
     where
         Self: Sized
     {
-        self.run_with_out(input).0
+        self.run_with_out(input, Location::new()).0
     }
     fn map<B, F>(self, f: F) -> ParserMap<Self, F>
     where
@@ -45,11 +47,12 @@ pub trait Parser:
 impl<'a> Parser for Token<'a> {
     type Out = &'a str;
 
-    fn run_with_out(self, input: &str) -> (Option<Self::Out>, &str) {
+    fn run_with_out(self, input: &str, loc: Location) -> (Option<Self::Out>, &str, Location) {
         if let Some(o) = input.strip_prefix(&self.0) {
-            (Some(self.0), o)
+            let loc_parse = loc.update(self.0);
+            (Some(self.0), o, loc_parse.0)
         } else {
-            (None, input)
+            (None, input, loc)
         }
     }
 }
@@ -57,13 +60,16 @@ impl<'a> Parser for Token<'a> {
 impl<'a> Parser for ParseRegex<'a> {
     type Out = String;//&'a str;TODO:
 
-    fn run_with_out(self, input: &str) -> (Option<Self::Out>, &str) {
+    fn run_with_out(self, input: &str, loc: Location) -> (Option<Self::Out>, &str, Location) {
         let re = Regex::new(self.0).unwrap();
         let cap = re.find(input).map(|x| x.as_str());
         let o = cap.and_then(|x| input.strip_prefix(x));
         match o {
-            Some(output) => (cap.map(|x| x.to_string()), output),
-            None => (None, input)
+            Some(output) => {
+                let loc_parse = loc.update(cap.unwrap());
+                (cap.map(|x| x.to_string()), output, loc_parse.0)
+            },
+            None => (None, input, loc)
         }
     }
 }
@@ -71,11 +77,11 @@ impl<'a> Parser for ParseRegex<'a> {
 impl<A: Parser> Parser for Try<A> {
     type Out = Option<A::Out>;
 
-    fn run_with_out(self, input: &str) -> (Option<Self::Out>, &str) {
-        let (out, next_str) = self.0.run_with_out(input);
+    fn run_with_out(self, input: &str, loc: Location) -> (Option<Self::Out>, &str, Location) {
+        let (out, next_str, loc_parse) = self.0.run_with_out(input, loc);
         match out {
-            Some(x) => (Some(Some(x)),next_str),
-            None => (Some(None), input),
+            Some(x) => (Some(Some(x)),next_str, loc_parse),
+            None => (Some(None), input, loc),
         }
     }
 }
@@ -83,28 +89,40 @@ impl<A: Parser> Parser for Try<A> {
 impl<'a, A: Parser + Copy> Parser for Many<'a, A> {
     type Out = Vec<A::Out>;
 
-    fn run_with_out(self, input: &str) -> (Option<Self::Out>, &str) {
+    fn run_with_out(self, input: &str, loc: Location) -> (Option<Self::Out>, &str, Location) {
         let mut ret = Vec::new();
         let mut text = input;
+        let mut loc_parse = loc;
         loop {
-            let parse = self.0.run_with_out(text);
+            let parse = self.0.run_with_out(text, loc_parse);
             match parse.0 {
                 Some(item) => {
                     ret.push(item);
                     match self.1 {
                         Some(sep) => {
                             match parse.1.strip_prefix(sep) {
-                                Some(t) => text = t,
-                                None => {text = parse.1; break},
+                                Some(t) => {
+                                    text = t;
+                                    let loc_parse_sep = parse.2.update(sep);
+                                    loc_parse = loc_parse_sep.0;
+                                },
+                                None => {
+                                    text = parse.1;
+                                    loc_parse = parse.2;
+                                    break
+                                },
                             }
                         },
-                        None => text = parse.1,
+                        None => {
+                            text = parse.1;
+                            loc_parse = parse.2;
+                        },
                     }
                 },
                 None => break,
             }
         }
-        (Some(ret), text)
+        (Some(ret), text, loc_parse)
     }
 }
 
@@ -114,19 +132,19 @@ where
 {
     type Out = B;
 
-    fn run_with_out(self, input: &str) -> (Option<Self::Out>, &str) {
-        let (o, s) = self.0.run_with_out(input);
-        (o.map(self.1), s)
+    fn run_with_out(self, input: &str, loc: Location) -> (Option<Self::Out>, &str, Location) {
+        let (o, s, loc_parse) = self.0.run_with_out(input, loc);
+        (o.map(self.1), s, loc_parse)
     }
 }
 
 impl<A: Parser, B: Parser> Parser for ParserProduct<A, B> {
     type Out = (A::Out, B::Out);
 
-    fn run_with_out(self, input: &str) -> (Option<Self::Out>, &str) {
-        let (lefto, lefts) = self.0.run_with_out(input);
-        let (righto, rights) = self.1.run_with_out(lefts);
-        (lefto.and_then(|x| righto.map(|y| (x,y))), rights)
+    fn run_with_out(self, input: &str, loc: Location) -> (Option<Self::Out>, &str, Location) {
+        let (lefto, lefts, loc_left) = self.0.run_with_out(input, loc);
+        let (righto, rights, loc_right) = self.1.run_with_out(lefts, loc_left);
+        (lefto.and_then(|x| righto.map(|y| (x,y))), rights, loc_right)
         //(self.0.run(input), self.1.run())
     }    
 }
@@ -134,17 +152,17 @@ impl<A: Parser, B: Parser> Parser for ParserProduct<A, B> {
 impl<A: Parser, B: Parser> Parser for ParserLeft<A, B> {
     type Out = A::Out;
 
-    fn run_with_out(self, input: &str) -> (Option<Self::Out>, &str) {
-        let (lefto, lefts) = self.0.run_with_out(input);
-        let (righto, rights) = self.1.run_with_out(lefts);
+    fn run_with_out(self, input: &str, loc: Location) -> (Option<Self::Out>, &str, Location) {
+        let (lefto, lefts, loc_left) = self.0.run_with_out(input, loc);
+        let (righto, rights, loc_right) = self.1.run_with_out(lefts, loc_left);
         match lefto {
             Some(l) => {
                 match righto {
-                    Some(_) => (Some(l), rights),
-                    None => (None, input)
+                    Some(_) => (Some(l), rights, loc_right),
+                    None => (None, input, loc)
                 }
             }
-            None => (None,input)
+            None => (None, input, loc)
         }
     }
 }
@@ -152,17 +170,17 @@ impl<A: Parser, B: Parser> Parser for ParserLeft<A, B> {
 impl<A: Parser, B: Parser> Parser for ParserRight<A, B> {
     type Out = B::Out;
 
-    fn run_with_out(self, input: &str) -> (Option<Self::Out>, &str) {
-        let (lefto, lefts) = self.0.run_with_out(input);
-        let (righto, rights) = self.1.run_with_out(lefts);
+    fn run_with_out(self, input: &str, loc: Location) -> (Option<Self::Out>, &str, Location) {
+        let (lefto, lefts, loc_left) = self.0.run_with_out(input, loc);
+        let (righto, rights, loc_right) = self.1.run_with_out(lefts, loc_left);
         match lefto {
             Some(_) => {
                 match righto {
-                    Some(r) => (Some(r), rights),
-                    None => (None, input)
+                    Some(r) => (Some(r), rights, loc_right),
+                    None => (None, input, loc)
                 }
             }
-            None => (None,input)
+            None => (None, input, loc)
         }
     }
 }
@@ -170,11 +188,11 @@ impl<A: Parser, B: Parser> Parser for ParserRight<A, B> {
 impl<O, A: Parser<Out = O>, B: Parser<Out = O>> Parser for ParserOr<A, B> {
     type Out = O;
 
-    fn run_with_out(self, input: &str) -> (Option<Self::Out>, &str) {
-        let (lefto, lefts) = self.0.run_with_out(input);
-        let ro = self.1.run_with_out(input);
+    fn run_with_out(self, input: &str, loc: Location) -> (Option<Self::Out>, &str, Location) {
+        let (lefto, lefts, loc_left) = self.0.run_with_out(input, loc);
+        let ro = self.1.run_with_out(input, loc_left);
         match lefto {
-            Some(l) => (Some(l), lefts),
+            Some(l) => (Some(l), lefts, loc_left),
             None => ro,
         }
     }
