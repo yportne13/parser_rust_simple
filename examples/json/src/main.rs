@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use parser_rust_simple::parser_trait::*;
+use parser_rust_simple::location::*;
 
 #[derive(Debug)]
 enum JSON {
@@ -11,7 +12,7 @@ enum JSON {
     JObject(HashMap<String, JSON>)
 }
 
-fn json_parser(input: &str) -> (Option<JSON>, &str) {
+fn json_parser(input: &str) -> (Option<JSON>, &str, Location) {
     let whitespace = ParseRegex(r"\s*");
     let head = whitespace >> Token("{") << whitespace;
     let tail = whitespace >> Token("}") << whitespace;
@@ -38,7 +39,7 @@ fn json_parser(input: &str) -> (Option<JSON>, &str) {
         Many(value, Some(",")).map(|x| JSON::JObject(x.into_iter().collect::<HashMap<String, JSON>>()))
         << tail;
 
-    obj.run_with_out(input)
+    obj.run_with_out(input, Location::new())
 }
 
 fn main() {
@@ -55,4 +56,5 @@ fn main() {
     let ret = json_parser(input);
     println!("{:?}", ret.0);
     println!("{:?}", ret.1);
+    println!("{:?}", ret.2);
 }
