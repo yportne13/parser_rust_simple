@@ -25,7 +25,7 @@ pub struct ParserRight<A, B>(pub A, pub B);
 pub struct ParserOr<A, B>(pub A, pub B);
 
 pub trait Parser:
-    Mul + Shr + Shl + std::marker::Sized
+    Mul + Shr + Shl + std::marker::Sized + Copy
 {
     type Out;
     fn run_with_out(self, input: &str, loc: Location) -> (Option<Self::Out>, &str, Location);
@@ -128,7 +128,7 @@ impl<'a, A: Parser + Copy> Parser for Many<'a, A> {
 
 impl<B, I: Parser, F> Parser for ParserMap<I, F>
 where
-    F: Fn(I::Out) -> B
+    F: Fn(I::Out) -> B + Copy
 {
     type Out = B;
 
