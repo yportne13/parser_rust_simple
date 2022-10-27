@@ -42,6 +42,22 @@ pub trait Parser:
     {
         ParserMap(self, f)
     }
+
+    /// for a Parser<Out = A> and Parser<Out = B>, get Parser<Out = (A,B)>
+    /// same as *
+    fn zip<B>(self, rhs: B) -> ParserProduct<Self, B> {
+        ParserProduct(self, rhs)
+    }
+    /// throw rhs
+    /// same as <<
+    fn left<B>(self, rhs: B) -> ParserLeft<Self, B> {
+        ParserLeft(self, rhs)
+    }
+    /// throw self
+    /// same as >>
+    fn right<B>(self, rhs: B) -> ParserRight<Self, B> {
+        ParserRight(self, rhs)
+    }
 }
 
 impl<'a> Parser for Token<'a> {
@@ -81,7 +97,7 @@ impl<A: Parser> Parser for Try<A> {
         let (out, next_str, loc_parse) = self.0.run_with_out(input, loc);
         match out {
             Ok(x) => (Ok(Some(x)),next_str, loc_parse),
-            Err(e) => (Ok(None), input, loc),
+            Err(_) => (Ok(None), input, loc),
         }
     }
 }
