@@ -102,10 +102,7 @@ impl<A: Parser> Parser for Try<A> {
 
     fn run_with_out(self, input: &str, loc: Location) -> (Result<Self::Out, Location>, &str, Location) {
         let (out, next_str, loc_parse) = self.0.run_with_out(input, loc);
-        match out {
-            Ok(x) => (Ok(Some(x)),next_str, loc_parse),
-            Err(_) => (Ok(None), input, loc),
-        }
+        (Ok(out.ok()), next_str, loc_parse)
     }
 }
 
@@ -175,9 +172,16 @@ impl<A: Parser, B: Parser> Parser for ParserProduct<A, B> {
 
     fn run_with_out(self, input: &str, loc: Location) -> (Result<Self::Out, Location>, &str, Location) {
         let (lefto, lefts, loc_left) = self.0.run_with_out(input, loc);
-        let (righto, rights, loc_right) = self.1.run_with_out(lefts, loc_left);
-        (lefto.and_then(|x| righto.map(|y| (x,y))), rights, loc_right)
-        //(self.0.run(input), self.1.run())
+        match lefto {
+            Ok(l) => {
+                let (righto, rights, loc_right) = self.1.run_with_out(lefts, loc_left);
+                match righto {
+                    Ok(r) => (Ok((l,r)), rights, loc_right),
+                    Err(e) => (Err(e), input, loc)
+                }
+            },
+            Err(e) => (Err(e), input, loc)
+        }
     }    
 }
 
@@ -186,9 +190,9 @@ impl<A: Parser, B: Parser> Parser for ParserLeft<A, B> {
 
     fn run_with_out(self, input: &str, loc: Location) -> (Result<Self::Out, Location>, &str, Location) {
         let (lefto, lefts, loc_left) = self.0.run_with_out(input, loc);
-        let (righto, rights, loc_right) = self.1.run_with_out(lefts, loc_left);
         match lefto {
             Ok(l) => {
+                let (righto, rights, loc_right) = self.1.run_with_out(lefts, loc_left);
                 match righto {
                     Ok(_) => (Ok(l), rights, loc_right),
                     Err(e) => (Err(e), input, loc)
@@ -204,9 +208,9 @@ impl<A: Parser, B: Parser> Parser for ParserRight<A, B> {
 
     fn run_with_out(self, input: &str, loc: Location) -> (Result<Self::Out, Location>, &str, Location) {
         let (lefto, lefts, loc_left) = self.0.run_with_out(input, loc);
-        let (righto, rights, loc_right) = self.1.run_with_out(lefts, loc_left);
         match lefto {
             Ok(_) => {
+                let (righto, rights, loc_right) = self.1.run_with_out(lefts, loc_left);
                 match righto {
                     Ok(r) => (Ok(r), rights, loc_right),
                     Err(e) => (Err(e), input, loc)
@@ -222,10 +226,9 @@ impl<O, A: Parser<Out = O>, B: Parser<Out = O>> Parser for ParserOr<A, B> {
 
     fn run_with_out(self, input: &str, loc: Location) -> (Result<Self::Out, Location>, &str, Location) {
         let (lefto, lefts, loc_left) = self.0.run_with_out(input, loc);
-        let ro = self.1.run_with_out(input, loc_left);
         match lefto {
             Ok(l) => (Ok(l), lefts, loc_left),
-            Err(_) => ro,
+            Err(_) => self.1.run_with_out(input, loc_left),
         }
     }
 }
