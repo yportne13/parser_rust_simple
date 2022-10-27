@@ -11,6 +11,8 @@ pub struct ParseRegex<'a>(pub &'a str);
 #[derive(Clone, Copy)]
 pub struct Try<A>(pub A);
 #[derive(Clone, Copy)]
+pub struct DontConsume<A>(pub A);
+#[derive(Clone, Copy)]
 pub struct Many<'a, A>(pub A, pub Option<&'a str>);
 
 #[derive(Clone, Copy)]
@@ -45,18 +47,23 @@ pub trait Parser:
 
     /// for a Parser<Out = A> and Parser<Out = B>, get Parser<Out = (A,B)>
     /// same as *
-    fn zip<B>(self, rhs: B) -> ParserProduct<Self, B> {
+    fn zip<B: Parser>(self, rhs: B) -> ParserProduct<Self, B> {
         ParserProduct(self, rhs)
     }
     /// throw rhs
     /// same as <<
-    fn left<B>(self, rhs: B) -> ParserLeft<Self, B> {
+    fn left<B: Parser>(self, rhs: B) -> ParserLeft<Self, B> {
         ParserLeft(self, rhs)
     }
     /// throw self
     /// same as >>
-    fn right<B>(self, rhs: B) -> ParserRight<Self, B> {
+    fn right<B: Parser>(self, rhs: B) -> ParserRight<Self, B> {
         ParserRight(self, rhs)
+    }
+    /// self or rhs
+    /// same as |
+    fn or<B: Parser<Out = Self::Out>>(self, rhs: B) -> ParserOr<Self, B> {
+        ParserOr(self, rhs)
     }
 }
 
@@ -99,6 +106,15 @@ impl<A: Parser> Parser for Try<A> {
             Ok(x) => (Ok(Some(x)),next_str, loc_parse),
             Err(_) => (Ok(None), input, loc),
         }
+    }
+}
+
+impl<A: Parser> Parser for DontConsume<A> {
+    type Out = A::Out;
+
+    fn run_with_out(self, input: &str, loc: Location) -> (Result<Self::Out, Location>, &str, Location) {
+        let (out, _, _) = self.0.run_with_out(input, loc);
+        (out, input, loc)
     }
 }
 
@@ -304,6 +320,7 @@ macro_rules! opmany_impl {
 ops_impl!(Token<'a>);
 ops_impl!(ParseRegex<'a>);
 ops_impl!(A, Try<A>);
+ops_impl!(A, DontConsume<A>);
 ops_impl!(I, F, ParserMap<I, F>);
 ops_impl!(I, F, ParserProduct<I, F>);
 ops_impl!(I, F, ParserLeft<I, F>);
