@@ -9,11 +9,11 @@ pub fn token(s: &'_ str) -> ParserLeft<Token<'_>, ParseRegex<'_>> {
     Token(s) << ParseRegex(r"\s*")
 }
 
-pub fn int() -> impl Parser<Out = i64> {
+pub fn int<'a>() -> ParserMap<ParseRegex<'a>, impl Fn(String) -> i64 + Sized + Copy> {
     ParseRegex(r"[-+]?[0-9]+").map(|x| x.parse::<i64>().unwrap())
 }
 
-pub fn float() -> impl Parser<Out = f64> {
+pub fn float<'a>() -> ParserMap<ParseRegex<'a>, impl Fn(String) -> f64 + Sized + Copy> {
     ParseRegex(r"[-+]?([0-9]*\.)?[0-9]+([eE][-+]?[0-9]+)?").map(|x| x.parse::<f64>().unwrap())
 }
 
