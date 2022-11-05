@@ -15,6 +15,9 @@ pub struct DontConsume<A>(pub A);
 #[derive(Clone, Copy)]
 pub struct Many<'a, A>(pub A, pub Option<&'a str>);
 
+type ParseFunction<A> = dyn Fn(&str, Location) -> (Result<A, Location>, &str, Location);
+pub struct ParserFunct<A>(pub Box<ParseFunction<A>>);
+
 #[derive(Clone, Copy)]
 pub struct ParserMap<I, F>(pub I, pub F);
 #[derive(Clone, Copy)]
@@ -27,10 +30,13 @@ pub struct ParserRight<A, B>(pub A, pub B);
 pub struct ParserOr<A, B>(pub A, pub B);
 
 pub trait Parser:
-    Mul + Shr + Shl + std::marker::Sized + Copy
+    Mul + Shr + Shl + std::marker::Sized
 {
     type Out;
-    fn run_with_out(self, input: &str, loc: Location) -> (Result<Self::Out, Location>, &str, Location);
+    fn run_with_out<'a>(&self, input: &'a str, loc: Location) -> (Result<Self::Out, Location>, &'a str, Location);
+    //fn run_with_out(self, input: &'_ str, loc: Location) -> (Result<Self::Out, Location>, &str, Location) {
+    //    self.run_with_out_borrow(input, loc)
+    //}
     fn run(self, input: &str) -> Result<Self::Out, Location>
     where
         Self: Sized
@@ -65,12 +71,21 @@ pub trait Parser:
     fn or<B: Parser<Out = Self::Out>>(self, rhs: B) -> ParserOr<Self, B> {
         ParserOr(self, rhs)
     }
+
+    fn tobox(self) -> ParserFunct<Self::Out>
+    where
+        Self: 'static//TODO:
+    {
+        ParserFunct(Box::new(
+            move |input, loc| self.run_with_out(input, loc)
+        ))
+    }
 }
 
 impl<'a> Parser for Token<'a> {
     type Out = &'a str;
 
-    fn run_with_out(self, input: &str, loc: Location) -> (Result<Self::Out, Location>, &str, Location) {
+    fn run_with_out<'b>(&self, input: &'b str, loc: Location) -> (Result<Self::Out, Location>, &'b str, Location) {
         if let Some(o) = input.strip_prefix(&self.0) {
             let loc_parse = loc.update(self.0);
             (Ok(self.0), o, loc_parse.0)
@@ -83,7 +98,7 @@ impl<'a> Parser for Token<'a> {
 impl<'a> Parser for ParseRegex<'a> {
     type Out = String;//&'a str;TODO:
 
-    fn run_with_out(self, input: &str, loc: Location) -> (Result<Self::Out, Location>, &str, Location) {
+    fn run_with_out<'b>(&self, input: &'b str, loc: Location) -> (Result<Self::Out, Location>, &'b str, Location) {
         let re = Regex::new(self.0).unwrap();
         let cap = re.find(input).map(|x| x.as_str());
         let o = cap.and_then(|x| input.strip_prefix(x));
@@ -100,7 +115,7 @@ impl<'a> Parser for ParseRegex<'a> {
 impl<A: Parser> Parser for Try<A> {
     type Out = Option<A::Out>;
 
-    fn run_with_out(self, input: &str, loc: Location) -> (Result<Self::Out, Location>, &str, Location) {
+    fn run_with_out<'a>(&self, input: &'a str, loc: Location) -> (Result<Self::Out, Location>, &'a str, Location) {
         let (out, next_str, loc_parse) = self.0.run_with_out(input, loc);
         (Ok(out.ok()), next_str, loc_parse)
     }
@@ -109,16 +124,16 @@ impl<A: Parser> Parser for Try<A> {
 impl<A: Parser> Parser for DontConsume<A> {
     type Out = A::Out;
 
-    fn run_with_out(self, input: &str, loc: Location) -> (Result<Self::Out, Location>, &str, Location) {
+    fn run_with_out<'a>(&self, input: &'a str, loc: Location) -> (Result<Self::Out, Location>, &'a str, Location) {
         let (out, _, _) = self.0.run_with_out(input, loc);
         (out, input, loc)
     }
 }
 
-impl<'a, A: Parser + Copy> Parser for Many<'a, A> {
+impl<'a, A: Parser> Parser for Many<'a, A> {
     type Out = Vec<A::Out>;
 
-    fn run_with_out(self, input: &str, loc: Location) -> (Result<Self::Out, Location>, &str, Location) {
+    fn run_with_out<'b>(&self, input: &'b str, loc: Location) -> (Result<Self::Out, Location>, &'b str, Location) {
         let mut ret = Vec::new();
         let mut text = input;
         let mut loc_parse = loc;
@@ -155,13 +170,21 @@ impl<'a, A: Parser + Copy> Parser for Many<'a, A> {
     }
 }
 
+impl<A> Parser for ParserFunct<A> {
+    type Out = A;
+
+    fn run_with_out<'a>(&self, input: &'a str, loc: Location) -> (Result<Self::Out, Location>, &'a str, Location) {
+        self.0(input, loc)
+    }
+}
+
 impl<B, I: Parser, F> Parser for ParserMap<I, F>
 where
     F: Fn(I::Out) -> B + Copy
 {
     type Out = B;
 
-    fn run_with_out(self, input: &str, loc: Location) -> (Result<Self::Out, Location>, &str, Location) {
+    fn run_with_out<'a>(&self, input: &'a str, loc: Location) -> (Result<Self::Out, Location>, &'a str, Location) {
         let (o, s, loc_parse) = self.0.run_with_out(input, loc);
         (o.map(self.1), s, loc_parse)
     }
@@ -170,7 +193,7 @@ where
 impl<A: Parser, B: Parser> Parser for ParserProduct<A, B> {
     type Out = (A::Out, B::Out);
 
-    fn run_with_out(self, input: &str, loc: Location) -> (Result<Self::Out, Location>, &str, Location) {
+    fn run_with_out<'a>(&self, input: &'a str, loc: Location) -> (Result<Self::Out, Location>, &'a str, Location) {
         let (lefto, lefts, loc_left) = self.0.run_with_out(input, loc);
         match lefto {
             Ok(l) => {
@@ -188,7 +211,7 @@ impl<A: Parser, B: Parser> Parser for ParserProduct<A, B> {
 impl<A: Parser, B: Parser> Parser for ParserLeft<A, B> {
     type Out = A::Out;
 
-    fn run_with_out(self, input: &str, loc: Location) -> (Result<Self::Out, Location>, &str, Location) {
+    fn run_with_out<'a>(&self, input: &'a str, loc: Location) -> (Result<Self::Out, Location>, &'a str, Location) {
         let (lefto, lefts, loc_left) = self.0.run_with_out(input, loc);
         match lefto {
             Ok(l) => {
@@ -206,7 +229,7 @@ impl<A: Parser, B: Parser> Parser for ParserLeft<A, B> {
 impl<A: Parser, B: Parser> Parser for ParserRight<A, B> {
     type Out = B::Out;
 
-    fn run_with_out(self, input: &str, loc: Location) -> (Result<Self::Out, Location>, &str, Location) {
+    fn run_with_out<'a>(&self, input: &'a str, loc: Location) -> (Result<Self::Out, Location>, &'a str, Location) {
         let (lefto, lefts, loc_left) = self.0.run_with_out(input, loc);
         match lefto {
             Ok(_) => {
@@ -224,7 +247,7 @@ impl<A: Parser, B: Parser> Parser for ParserRight<A, B> {
 impl<O, A: Parser<Out = O>, B: Parser<Out = O>> Parser for ParserOr<A, B> {
     type Out = O;
 
-    fn run_with_out(self, input: &str, loc: Location) -> (Result<Self::Out, Location>, &str, Location) {
+    fn run_with_out<'a>(&self, input: &'a str, loc: Location) -> (Result<Self::Out, Location>, &'a str, Location) {
         let (lefto, lefts, loc_left) = self.0.run_with_out(input, loc);
         match lefto {
             Ok(l) => (Ok(l), lefts, loc_left),
@@ -324,6 +347,7 @@ ops_impl!(Token<'a>);
 ops_impl!(ParseRegex<'a>);
 ops_impl!(A, Try<A>);
 ops_impl!(A, DontConsume<A>);
+ops_impl!(A, ParserFunct<A>);
 ops_impl!(I, F, ParserMap<I, F>);
 ops_impl!(I, F, ParserProduct<I, F>);
 ops_impl!(I, F, ParserLeft<I, F>);
