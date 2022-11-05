@@ -15,8 +15,8 @@ pub struct DontConsume<A>(pub A);
 #[derive(Clone, Copy)]
 pub struct Many<'a, A>(pub A, pub Option<&'a str>);
 
-type ParseFunction<A> = dyn Fn(&str, Location) -> (Result<A, Location>, &str, Location);
-pub struct ParserFunct<A>(pub Box<ParseFunction<A>>);
+type ParseFunction<'a, A> = Box<dyn Fn(&str, Location) -> (Result<A, Location>, &str, Location) + 'a>;
+pub struct ParserFunct<'a, A>(pub Box<dyn Fn() -> ParseFunction<'a, A> + 'a>);
 
 #[derive(Clone, Copy)]
 pub struct ParserMap<I, F>(pub I, pub F);
@@ -71,15 +71,23 @@ pub trait Parser:
     fn or<B: Parser<Out = Self::Out>>(self, rhs: B) -> ParserOr<Self, B> {
         ParserOr(self, rhs)
     }
+}
 
-    fn tobox(self) -> ParserFunct<Self::Out>
-    where
-        Self: 'static//TODO:
-    {
-        ParserFunct(Box::new(
-            move |input, loc| self.run_with_out(input, loc)
-        ))
-    }
+pub fn tobox<'a, A, P>(p: P) -> ParserFunct<'a, A>
+where
+    P: Fn(&str, Location) -> (Result<A, Location>, &str, Location) + Copy + 'a
+{
+    ParserFunct(Box::new(move || {
+        Box::new(p)
+    }))
+}
+
+#[macro_export]
+/// for recursive
+macro_rules! tobox {
+    ($p: expr) => {
+        tobox(move |input, loc| $p.run_with_out(input, loc))
+    };
 }
 
 impl<'a> Parser for Token<'a> {
@@ -170,11 +178,11 @@ impl<'a, A: Parser> Parser for Many<'a, A> {
     }
 }
 
-impl<A> Parser for ParserFunct<A> {
+impl<'a, A> Parser for ParserFunct<'a, A> {
     type Out = A;
 
-    fn run_with_out<'a>(&self, input: &'a str, loc: Location) -> (Result<Self::Out, Location>, &'a str, Location) {
-        self.0(input, loc)
+    fn run_with_out<'b>(&self, input: &'b str, loc: Location) -> (Result<Self::Out, Location>, &'b str, Location) {
+        (self.0())(input, loc)
     }
 }
 
@@ -347,7 +355,6 @@ ops_impl!(Token<'a>);
 ops_impl!(ParseRegex<'a>);
 ops_impl!(A, Try<A>);
 ops_impl!(A, DontConsume<A>);
-ops_impl!(A, ParserFunct<A>);
 ops_impl!(I, F, ParserMap<I, F>);
 ops_impl!(I, F, ParserProduct<I, F>);
 ops_impl!(I, F, ParserLeft<I, F>);
@@ -357,3 +364,6 @@ ops_impl!(I, F, ParserOr<I, F>);
 opmany_impl!(A, Many<'a,A>, Mul<B>, mul, ParserProduct<Self, B>, ParserProduct);
 opmany_impl!(A, Many<'a,A>, Shr<B>, shr, ParserRight<Self, B>, ParserRight);
 opmany_impl!(A, Many<'a,A>, Shl<B>, shl, ParserLeft<Self, B>, ParserLeft);
+opmany_impl!(A, ParserFunct<'a,A>, Mul<B>, mul, ParserProduct<Self, B>, ParserProduct);
+opmany_impl!(A, ParserFunct<'a,A>, Shr<B>, shr, ParserRight<Self, B>, ParserRight);
+opmany_impl!(A, ParserFunct<'a,A>, Shl<B>, shl, ParserLeft<Self, B>, ParserLeft);
