@@ -82,8 +82,8 @@ where
     }))
 }
 
-#[macro_export]
 /// for recursive
+#[macro_export]
 macro_rules! tobox {
     ($p: expr) => {
         tobox(move |input, loc| $p.run_with_out(input, loc))
