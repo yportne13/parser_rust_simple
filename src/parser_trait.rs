@@ -94,7 +94,7 @@ impl<'a> Parser for Token<'a> {
     type Out = &'a str;
 
     fn run_with_out<'b>(&self, input: &'b str, loc: Location) -> (Result<Self::Out, Location>, &'b str, Location) {
-        if let Some(o) = input.strip_prefix(&self.0) {
+        if let Some(o) = input.strip_prefix(self.0) {
             let loc_parse = loc.update(self.0);
             (Ok(self.0), o, loc_parse.0)
         } else {
@@ -154,7 +154,7 @@ impl<'a, A: Parser> Parser for Many<'a, A> {
                         Some(sep) => {
                             match parse.1.strip_prefix(sep) {
                                 Some(t) => {
-                                    text = t;
+                                    text = t.trim_start();
                                     let loc_parse_sep = parse.2.update(sep);
                                     loc_parse = loc_parse_sep.0;
                                 },

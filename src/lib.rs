@@ -62,3 +62,12 @@ fn rec2() {
     let parser = array();
     println!("{:?}", parser.run(input))
 }
+
+#[test]
+fn many_trim() {
+    use prelude::*;
+    let input = r"a, b,
+    c,    d";
+    let parser = Many(ParseRegex(r"[a-z]"), Some(","));
+    println!("{:?}", parser.run(input))
+}
