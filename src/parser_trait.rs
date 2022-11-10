@@ -155,7 +155,7 @@ impl<'a, A: Parser> Parser for Many<'a, A> {
                             match parse.1.strip_prefix(sep) {
                                 Some(t) => {
                                     text = t.trim_start();
-                                    let loc_parse_sep = parse.2.update(sep);
+                                    let loc_parse_sep = parse.2.update(parse.1.strip_suffix(text).unwrap());
                                     loc_parse = loc_parse_sep.0;
                                 },
                                 None => {
