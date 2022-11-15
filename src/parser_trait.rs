@@ -21,6 +21,8 @@ pub struct ParserFunct<'a, A>(pub Box<dyn Fn() -> ParseFunction<'a, A> + 'a>);
 #[derive(Clone, Copy)]
 pub struct ParserMap<I, F>(pub I, pub F);
 #[derive(Clone, Copy)]
+pub struct ParserFlatMap<I, F>(pub I, pub F);
+#[derive(Clone, Copy)]
 pub struct ParserProduct<A, B>(pub A, pub B);
 #[derive(Clone, Copy)]
 pub struct ParserLeft<A, B>(pub A, pub B);
@@ -49,6 +51,13 @@ pub trait Parser:
         Self: Sized
     {
         ParserMap(self, f)
+    }
+    fn flatmap<B, F>(self, f: F) -> ParserFlatMap<Self, F>
+    where
+        F: Fn(Self::Out) -> Result<B, Location>,
+        Self: Sized
+    {
+        ParserFlatMap(self, f)
     }
 
     /// for a Parser<Out = A> and Parser<Out = B>, get Parser<Out = (A,B)>
@@ -195,6 +204,18 @@ where
     fn run_with_out<'a>(&self, input: &'a str, loc: Location) -> (Result<Self::Out, Location>, &'a str, Location) {
         let (o, s, loc_parse) = self.0.run_with_out(input, loc);
         (o.map(self.1), s, loc_parse)
+    }
+}
+
+impl<B, I: Parser, F> Parser for ParserFlatMap<I, F>
+where
+    F: Fn(I::Out) -> Result<B, Location> + Copy
+{
+    type Out = B;
+
+    fn run_with_out<'a>(&self, input: &'a str, loc: Location) -> (Result<Self::Out, Location>, &'a str, Location) {
+        let (o, s, loc_parse) = self.0.run_with_out(input, loc);
+        (o.and_then(self.1), s, loc_parse)
     }
 }
 
@@ -356,6 +377,7 @@ ops_impl!(ParseRegex<'a>);
 ops_impl!(A, Try<A>);
 ops_impl!(A, DontConsume<A>);
 ops_impl!(I, F, ParserMap<I, F>);
+ops_impl!(I, F, ParserFlatMap<I, F>);
 ops_impl!(I, F, ParserProduct<I, F>);
 ops_impl!(I, F, ParserLeft<I, F>);
 ops_impl!(I, F, ParserRight<I, F>);
