@@ -5,13 +5,13 @@ use crate::prelude::*;
 use crate::tobox;
 
 #[derive(Debug)]
-enum JSON {
-    JNull,
-    JString(String),
-    JNumber(f64),
-    JBool(bool),
-    JArray(Vec<JSON>),
-    JObject(HashMap<String, JSON>)
+enum Json {
+    Null,
+    String(String),
+    Number(f64),
+    Bool(bool),
+    Array(Vec<Json>),
+    Object(HashMap<String, Json>)
 }
 
 fn head<'a>() -> impl Parser<Out = &'a str> {
@@ -22,40 +22,40 @@ fn tail<'a>() -> impl Parser<Out = &'a str> {
     whitespace() >> token("}")
 }
 
-fn lit_temp() -> impl Parser<Out = JSON> {
-    token("null").map(|_| JSON::JNull) |
-        float().left(whitespace()).map(JSON::JNumber) |
-        escaped_quoted().left(whitespace()).map(JSON::JString) |
-        token("true").map(|_| JSON::JBool(true)) |
-        token("false").map(|_| JSON::JBool(false))
+fn lit_temp() -> impl Parser<Out = Json> {
+    token("null").map(|_| Json::Null) |
+        float().left(whitespace()).map(Json::Number) |
+        escaped_quoted().left(whitespace()).map(Json::String) |
+        token("true").map(|_| Json::Bool(true)) |
+        token("false").map(|_| Json::Bool(false))
 }
 
-fn lit() -> impl Parser<Out = JSON> {
+fn lit() -> impl Parser<Out = Json> {
     whitespace() >> lit_temp()
 }
 
-fn array() -> impl Parser<Out = JSON> {
+fn array() -> impl Parser<Out = Json> {
     (whitespace() >> token("[")) >>
-        Many(tobox!(value()), Some(",")).map(JSON::JArray)//TODO: lit => value
+        Many(tobox!(value()), Some(",")).map(Json::Array)//TODO: lit => value
         << (whitespace() >> token("]"))
 }
 
-fn value() -> impl Parser<Out = JSON> {
+fn value() -> impl Parser<Out = Json> {
     lit().or(array()).or(tobox!(obj()))
 }
 
-fn key_value() -> impl Parser<Out = (String, JSON)> {
+fn key_value() -> impl Parser<Out = (String, Json)> {
     whitespace() >> ((escaped_quoted().left(whitespace()) << token(":")) *
         value())
 }
 
-fn obj() -> impl Parser<Out = JSON> {
+fn obj() -> impl Parser<Out = Json> {
     head().right(
-        Many(key_value(), Some(",")).map(|x| JSON::JObject(x.into_iter().collect::<HashMap<String, JSON>>()))
+        Many(key_value(), Some(",")).map(|x| Json::Object(x.into_iter().collect::<HashMap<String, Json>>()))
     ) << tail()
 }
 
-fn json_parser(input: &str) -> (Result<JSON, Location>, &str, Location) {
+fn json_parser(input: &str) -> (Result<Json, Location>, &str, Location) {
     obj().run_with_out(input, Location::new())
 }
 
@@ -75,4 +75,6 @@ fn main() {
     println!("{:?}", ret.0);
     println!("{:?}", ret.1);
     println!("{:?}", ret.2);
+
+    println!("{}", std::mem::size_of_val(&obj()))
 }
